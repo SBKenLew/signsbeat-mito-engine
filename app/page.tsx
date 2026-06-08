@@ -24,6 +24,7 @@ function today() {
 
 export default function Home() {
   const [result, setResult] = useState<EngineResult | null>(null);
+  const [detected, setDetected] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"upload" | "demo">("upload");
@@ -39,6 +40,7 @@ export default function Home() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Analysis failed");
       setResult(json.result);
+      setDetected(json.detected_interventions ?? []);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -74,6 +76,7 @@ export default function Home() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Demo failed");
       setResult(json.result);
+      setDetected(json.detected_interventions ?? []);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -82,7 +85,7 @@ export default function Home() {
   }
 
   const state: ProState = result ? deriveState(result) : "Baseline";
-  const healthScore = result ? parseFloat(result.mitochondrial_health_score) : 50;
+  const healthScore = result ? parseFloat(result.mitochondrial_health_score) : 0;
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center bg-gradient-to-b from-[#4A3B8C] via-[#6B5EA8] to-[#8B7FC4]">
@@ -131,6 +134,37 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Detected Interventions */}
+      {result && (
+        <div className="w-full max-w-md px-5 mt-4">
+          <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/15 p-4">
+            <p className="text-xs text-white/40 uppercase tracking-widest mb-2 font-semibold">
+              Detected in dataset
+            </p>
+            {detected.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {detected.map((name) => (
+                  <span
+                    key={name}
+                    className="px-3 py-1 rounded-full text-xs font-medium bg-violet-500/20 text-violet-200 border border-violet-400/20"
+                  >
+                    {name.replace(/_/g, " ")}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-red-300/80">
+                No known interventions or supplements detected in the uploaded dataset. Score is 0.
+                Ensure your CSV includes intervention names in columns such as{" "}
+                <span className="text-white/50">interventions</span>,{" "}
+                <span className="text-white/50">activity</span>, or{" "}
+                <span className="text-white/50">supplement</span>.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Input Section */}
       <div className="w-full max-w-md px-5 mt-6">
         <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/15 p-5">
@@ -147,7 +181,7 @@ export default function Home() {
             ))}
             {result && (
               <button
-                onClick={() => { setResult(null); setError(null); }}
+                onClick={() => { setResult(null); setDetected([]); setError(null); }}
                 className="py-2 px-3 rounded-xl text-sm font-semibold text-red-400 hover:bg-red-500/15 transition-all border border-red-400/20"
                 title="Delete data"
               >

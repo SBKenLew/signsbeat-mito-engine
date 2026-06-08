@@ -256,28 +256,28 @@ export function evaluateDailyMitochondrialHealth(profile: DailyProfile): EngineR
   const mix = layer1(profile.interventions);
   const validation = layer2(mix, profile.metrics_delta);
 
-  // Pure baseline: no interventions logged — return neutral 50 across all scores
+  // No interventions detected — score is 0; caller should prompt user to log data
   if (!mix.has_challenge && !mix.has_support) {
     return {
       profile: "Challenges: 0 | Supports: 0",
       composite_load: 0,
       response_status: validation.status,
-      is_positive: true,
-      reserve_capacity_score: "100.0%",
-      adaptation_score: "50.0%",
-      redox_resilience_score: "50.0%",
-      metabolic_flexibility_score: "50.0%",
+      is_positive: false,
+      reserve_capacity_score: "0.0%",
+      adaptation_score: "0.0%",
+      redox_resilience_score: "0.0%",
+      metabolic_flexibility_score: "0.0%",
       dysfunction_probability: "0.0%",
-      mitochondrial_health_score: "50.0%",
+      mitochondrial_health_score: "0.0%",
       layer_breakdown: {
         layer1: { support_count: 0, challenge_count: 0, cumulative_load: 0 },
         layer2: validation,
-        layer3: { adaptation_score: 50 },
-        layer4_reserve: { buffered_threshold: 16, reserve_capacity: 1 },
-        layer5_redox: { score: 50, phenotype: "Transitional — Partial ROS Clearance" },
-        layer6_metabolic: { score: 50, flexibility_class: "Moderately Flexible" },
-        layer7_dysfunction: { score: 0, risk_factors: [] },
-        layer8_health: { score: 50 },
+        layer3: { adaptation_score: 0 },
+        layer4_reserve: { buffered_threshold: 16, reserve_capacity: 0 },
+        layer5_redox: { score: 0, phenotype: "No intervention data detected in dataset" },
+        layer6_metabolic: { score: 0, flexibility_class: "No data" },
+        layer7_dysfunction: { score: 0, risk_factors: ["No intervention data detected"] },
+        layer8_health: { score: 0 },
       },
     };
   }
