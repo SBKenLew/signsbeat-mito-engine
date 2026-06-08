@@ -2,19 +2,16 @@
 
 import { useState } from "react";
 import ScoreGauge from "@/components/ScoreGauge";
-import MetricCard from "@/components/MetricCard";
 import FileUpload from "@/components/FileUpload";
 import LayerResults from "@/components/LayerResults";
-import type { EngineResult } from "@/lib/engine";
+import type { EngineResult, ProStateLabel } from "@/lib/engine";
 
-type ProState = "Recovery" | "MildStress" | "Stress" | "Baseline";
+type GaugeState = "Recovery" | "MildStress" | "Stress" | "Baseline";
 
-function deriveState(result: EngineResult): ProState {
-  const health = parseFloat(result.mitochondrial_health_score);
-  const dysfunction = parseFloat(result.dysfunction_probability);
-  if (!result.is_positive && dysfunction >= 50) return "Stress";
-  if (!result.is_positive || dysfunction >= 30) return "MildStress";
-  if (health >= 55) return "Recovery";
+function toGaugeState(pro: ProStateLabel): GaugeState {
+  if (pro === "Pro_Positive" || pro === "Pro_Recovery") return "Recovery";
+  if (pro === "Pro_MildStress") return "MildStress";
+  if (pro === "Pro_Stress") return "Stress";
   return "Baseline";
 }
 
@@ -22,9 +19,14 @@ function today() {
   return new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
 
+const ACTION_CLASS_COLORS = {
+  support:   "bg-sky-500/20 text-sky-200 border-sky-400/20",
+  challenge: "bg-violet-500/20 text-violet-200 border-violet-400/20",
+  unknown:   "bg-white/10 text-white/40 border-white/10",
+};
+
 export default function Home() {
   const [result, setResult] = useState<EngineResult | null>(null);
-  const [detected, setDetected] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"upload" | "demo">("upload");
@@ -40,7 +42,6 @@ export default function Home() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Analysis failed");
       setResult(json.result);
-      setDetected(json.detected_interventions ?? []);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -51,32 +52,37 @@ export default function Home() {
   async function runDemo() {
     setLoading(true);
     setError(null);
-    const profile = {
-      interventions: [
-        { name: "exercise", load_hours: 1.5 },
-        { name: "hiit", load_hours: 0.5 },
-        { name: "sleep", load_hours: 8 },
-        { name: "magnesium", load_hours: 1 },
-        { name: "omega-3", load_hours: 1 },
-      ],
-      metrics_delta: { pro_recovery: 2.1, pro_stress: 0.3, persistent_stress: false },
-      hrv_trend: 3.5,
-      sleep_trend: 0.8,
-      base_threshold_hours: 16,
-      previous_pro_recovery: 5.0,
-      current_pro_recovery: 7.1,
-      glucose_volatility: 0.5,
-      substrate_shifts: 2,
+    const payload = {
+      current: {
+        date: "2026-06-08",
+        actions: [
+          { name: "exercise",  classification: "challenge", load_hours: 1.5 },
+          { name: "hiit",      classification: "challenge", load_hours: 0.5 },
+          { name: "sleep",     classification: "support",   load_hours: 8 },
+          { name: "magnesium", classification: "support",   load_hours: 1 },
+          { name: "omega-3",   classification: "support",   load_hours: 1 },
+        ],
+        pro_positive:    0.72,
+        pro_recovery:    0.68,
+        pro_mild_stress: 0.18,
+        pro_stress:      0.08,
+      },
+      prev: {
+        date: "2026-06-07",
+        actions: [],
+        pro_positive:    0.55,
+        pro_recovery:    0.52,
+        pro_mild_stress: 0.22,
+        pro_stress:      0.28,
+      },
     };
     try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        body: (() => { const fd = new FormData(); fd.append("profile", JSON.stringify(profile)); return fd; })(),
-      });
+      const fd = new FormData();
+      fd.append("profile", JSON.stringify(payload));
+      const res = await fetch("/api/analyze", { method: "POST", body: fd });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Demo failed");
       setResult(json.result);
-      setDetected(json.detected_interventions ?? []);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -84,8 +90,15 @@ export default function Home() {
     }
   }
 
-  const state: ProState = result ? deriveState(result) : "Baseline";
-  const healthScore = result ? parseFloat(result.mitochondrial_health_score) : 0;
+  const gaugeState: GaugeState = result ? toGaugeState(result.pro_state) : "Baseline";
+  const healthScore = result?.mito_health_score ?? 0;
+  const allActions = result
+    ? [
+        ...result.support_actions.map((n) => ({ name: n, cls: "support" as const })),
+        ...result.challenge_actions.map((n) => ({ name: n, cls: "challenge" as const })),
+        ...result.unknown_actions.map((n) => ({ name: n, cls: "unknown" as const })),
+      ]
+    : [];
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center bg-gradient-to-b from-[#4A3B8C] via-[#6B5EA8] to-[#8B7FC4]">
@@ -94,7 +107,9 @@ export default function Home() {
       <div className="w-full max-w-md px-5 pt-12 pb-4 flex items-center justify-between">
         <div>
           <p className="text-white/50 text-sm">Your Longevity Assistant</p>
-          <h1 className="text-white font-bold text-xl leading-tight">Signsbeat <span className="text-violet-300">MitoEngine</span></h1>
+          <h1 className="text-white font-bold text-xl leading-tight">
+            Signsbeat <span className="text-violet-300">MitoEngine</span>
+          </h1>
         </div>
         <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur border border-white/30 flex items-center justify-center text-white font-bold text-sm">
           SB
@@ -105,23 +120,27 @@ export default function Home() {
       <div className="w-full max-w-md px-5">
         <div className="bg-white/15 backdrop-blur-xl rounded-3xl border border-white/20 p-6 shadow-2xl">
           <div className="flex flex-col items-center gap-4">
-            <ScoreGauge score={healthScore} state={state} />
+            <ScoreGauge score={healthScore} state={gaugeState} />
             <p className="text-white/50 text-sm text-center">{today()}</p>
 
             {result && (
               <div className="grid grid-cols-2 gap-3 w-full mt-1">
-                <MetricCard
-                  label="Adaptation"
-                  value={result.adaptation_score}
-                  sublabel="Recovery / Stress ratio"
-                  color="blue"
-                />
-                <MetricCard
-                  label="Redox Resilience"
-                  value={result.redox_resilience_score}
-                  sublabel="ROS clearance efficiency"
-                  color="green"
-                />
+                {/* Pro_Positive */}
+                <div className="bg-white/10 rounded-2xl p-3 border border-white/10 flex flex-col gap-1">
+                  <span className="text-xs text-white/40 uppercase tracking-wide">Pro_Positive</span>
+                  <span className="text-2xl font-bold text-emerald-400">{result.pro_state_values.pro_positive}%</span>
+                  <span className={`text-xs font-semibold ${result.pro_state_deltas.pro_positive_delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {result.pro_state_deltas.pro_positive_delta >= 0 ? "↑" : "↓"} {Math.abs(result.pro_state_deltas.pro_positive_delta)}% vs yesterday
+                  </span>
+                </div>
+                {/* Pro_Recovery */}
+                <div className="bg-white/10 rounded-2xl p-3 border border-white/10 flex flex-col gap-1">
+                  <span className="text-xs text-white/40 uppercase tracking-wide">Pro_Recovery</span>
+                  <span className="text-2xl font-bold text-sky-400">{result.pro_state_values.pro_recovery}%</span>
+                  <span className={`text-xs font-semibold ${result.pro_state_deltas.pro_recovery_delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {result.pro_state_deltas.pro_recovery_delta >= 0 ? "↑" : "↓"} {Math.abs(result.pro_state_deltas.pro_recovery_delta)}% vs yesterday
+                  </span>
+                </div>
               </div>
             )}
 
@@ -134,37 +153,41 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Detected Interventions */}
-      {result && (
+      {/* Detected Actions */}
+      {result && allActions.length > 0 && (
         <div className="w-full max-w-md px-5 mt-4">
           <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/15 p-4">
             <p className="text-xs text-white/40 uppercase tracking-widest mb-2 font-semibold">
-              Detected in dataset
+              Actions detected in dataset
             </p>
-            {detected.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {detected.map((name) => (
-                  <span
-                    key={name}
-                    className="px-3 py-1 rounded-full text-xs font-medium bg-violet-500/20 text-violet-200 border border-violet-400/20"
-                  >
-                    {name.replace(/_/g, " ")}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-red-300/80">
-                No known interventions or supplements detected in the uploaded dataset. Score is 0.
-                Ensure your CSV includes intervention names in a column named{" "}
-                <span className="text-white/50">ActionName</span>.
-              </p>
-            )}
+            <div className="flex flex-wrap gap-2">
+              {allActions.map(({ name, cls }) => (
+                <span key={name} className={`px-3 py-1 rounded-full text-xs font-medium border ${ACTION_CLASS_COLORS[cls]}`}>
+                  {cls === "challenge" ? "⚡ " : cls === "support" ? "✦ " : ""}
+                  {name.replace(/_/g, " ")}
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-3 mt-3 text-xs text-white/30">
+              <span>✦ Support</span>
+              <span>⚡ Challenge (Hormetic)</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result && allActions.length === 0 && (
+        <div className="w-full max-w-md px-5 mt-4">
+          <div className="bg-red-500/10 backdrop-blur-xl rounded-3xl border border-red-400/20 p-4">
+            <p className="text-sm text-red-300">
+              No actions detected. Ensure your CSV has an <span className="text-white/70">ActionName</span> column with intervention names.
+            </p>
           </div>
         </div>
       )}
 
       {/* Input Section */}
-      <div className="w-full max-w-md px-5 mt-6">
+      <div className="w-full max-w-md px-5 mt-4">
         <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/15 p-5">
           <div className="flex gap-2 mb-4">
             {(["upload", "demo"] as const).map((t) => (
@@ -179,9 +202,8 @@ export default function Home() {
             ))}
             {result && (
               <button
-                onClick={() => { setResult(null); setDetected([]); setError(null); }}
+                onClick={() => { setResult(null); setError(null); }}
                 className="py-2 px-3 rounded-xl text-sm font-semibold text-red-400 hover:bg-red-500/15 transition-all border border-red-400/20"
-                title="Delete data"
               >
                 Delete data
               </button>
@@ -193,7 +215,8 @@ export default function Home() {
           ) : (
             <div className="flex flex-col items-center gap-3 py-4">
               <p className="text-white/50 text-sm text-center">
-                Runs a pre-loaded scenario: HIIT + sleep + magnesium + omega-3 with positive HRV trend.
+                Demo: HIIT + exercise (Challenge) + sleep + magnesium + omega-3 (Support).
+                Previous day had elevated Pro_Stress (0.28) — today shows resilience building.
               </p>
               <button
                 onClick={runDemo}
@@ -213,41 +236,13 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Layer Results */}
+      {/* Layer Analysis */}
       {result && (
-        <div className="w-full max-w-md px-5 mt-6 mb-10">
-          <h2 className="text-white/60 text-xs uppercase tracking-widest mb-3 font-semibold">Layer Analysis</h2>
+        <div className="w-full max-w-md px-5 mt-6 mb-16">
+          <h2 className="text-white/60 text-xs uppercase tracking-widest mb-3 font-semibold">
+            Mitochondrial Analysis
+          </h2>
           <LayerResults result={result} />
-        </div>
-      )}
-
-      {/* Today's Tips */}
-      {result && (
-        <div className="w-full max-w-md px-5 mb-16">
-          <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/15 p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-red-400">♥</span>
-              <h3 className="text-white/80 text-sm font-semibold">Today&apos;s Health Tips</h3>
-            </div>
-            <ul className="flex flex-col gap-2">
-              {state === "Recovery" && <>
-                <li className="text-white/60 text-sm">Your mitochondria are adapting well — maintain current protocol.</li>
-                <li className="text-white/60 text-sm">Consider progressive overload on your next challenge day (T+1 rule).</li>
-              </>}
-              {state === "MildStress" && <>
-                <li className="text-white/60 text-sm">Adjust nutrition timing before increasing training load.</li>
-                <li className="text-white/60 text-sm">Add magnesium or omega-3 support to buffer current challenge load.</li>
-              </>}
-              {state === "Stress" && <>
-                <li className="text-warning text-red-300 text-sm font-medium">Reduce intensity or pause intervention — persistent stress detected.</li>
-                <li className="text-white/60 text-sm">Prioritise sleep and mitochondrial support interventions today.</li>
-              </>}
-              {state === "Baseline" && <>
-                <li className="text-white/60 text-sm">Engage endurance or strength training to activate AMPK signalling.</li>
-                <li className="text-white/60 text-sm">Upload your Signsbeat CSV for personalised layer analysis.</li>
-              </>}
-            </ul>
-          </div>
         </div>
       )}
 
@@ -256,7 +251,7 @@ export default function Home() {
         {[
           { icon: "⊙", label: "Dashboard" },
           { icon: "↑", label: "Upload" },
-          { icon: "≋", label: "Layers" },
+          { icon: "≋", label: "Analysis" },
           { icon: "⚙", label: "Settings" },
         ].map((n) => (
           <button key={n.label} className="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">

@@ -1,126 +1,79 @@
 import { NextRequest, NextResponse } from "next/server";
-import { evaluateDailyMitochondrialHealth, DailyProfile } from "@/lib/engine";
+import { evaluateDayData, classifyAction, DayData, Action } from "@/lib/engine";
 
 export const runtime = "edge";
 
-// All known intervention keywords — used to scan CSV columns and cell values
-const ALL_KNOWN_INTERVENTIONS = [
-  // support
-  "sleep", "coq10", "pqq", "creatine", "magnesium", "omega-3", "omega3",
-  "nac", "glycine", "protein_optimization", "protein",
-  // challenge
-  "fasting", "ketogenic_diet", "ketogenic", "keto", "exercise", "hiit",
-  "sauna", "cold_plunge", "cold_water", "cwi", "hbot", "red_light_therapy",
-  "red_light", "resistance", "aerobic", "cardio", "strength", "running",
-  "cycling", "swimming", "yoga", "meditation",
-];
-
-// Normalise a raw string to match known intervention keys
-function normaliseKey(s: string): string {
-  return s.toLowerCase().trim().replace(/[\s\-\/]+/g, "_");
+function normaliseHeader(h: string) {
+  return h.trim().toLowerCase().replace(/\s+/g, "_");
 }
 
-// Returns matched intervention name (engine-canonical) or null
-function matchIntervention(raw: string): string | null {
-  const key = normaliseKey(raw);
-  // exact match
-  if (ALL_KNOWN_INTERVENTIONS.includes(key)) return key;
-  // prefix / partial match (e.g. "omega_3" → "omega-3")
-  const found = ALL_KNOWN_INTERVENTIONS.find(
-    (k) => key.includes(normaliseKey(k)) || normaliseKey(k).includes(key)
-  );
-  return found ?? null;
-}
-
-function parseCSVRows(text: string): Record<string, string>[] {
+function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/\s+/g, "_"));
+  const headers = lines[0].split(",").map(normaliseHeader);
   return lines.slice(1).map((line) => {
     const vals = line.split(",");
     return Object.fromEntries(headers.map((h, i) => [h, (vals[i] ?? "").trim()]));
   });
 }
 
-// Detect interventions from a single CSV row by:
-//   1. Dedicated columns (interventions, activity, supplement, exercise_type, …)
-//   2. Column name itself matches a known intervention and cell is truthy/positive
-//   3. Free-text cell values that contain known keywords
-function detectInterventions(
-  row: Record<string, string>,
-  loadHours: number
-): Array<{ name: string; load_hours: number }> {
-  const found = new Map<string, number>(); // name → load_hours
-
-  // Pass 1 — explicit list columns (semicolon or comma-separated)
-  const listCols = ["actionname", "action_name", "interventions", "activity", "activities", "supplements", "supplement", "drugs", "therapies"];
-  for (const col of listCols) {
-    if (row[col]) {
-      for (const part of row[col].split(/[;,|]/)) {
-        const match = matchIntervention(part.trim());
-        if (match) found.set(match, loadHours);
-      }
-    }
-  }
-
-  // Pass 2 — column name IS a known intervention, cell is a truthy/positive marker
-  const positiveCells = new Set(["1", "yes", "true", "x", "✓", "done", "taken"]);
-  for (const [col, val] of Object.entries(row)) {
-    const match = matchIntervention(col);
-    if (match && (positiveCells.has(val.toLowerCase()) || parseFloat(val) > 0)) {
-      const hrs = parseFloat(val) > 1 ? parseFloat(val) : loadHours;
-      found.set(match, hrs);
-    }
-  }
-
-  // Pass 3 — scan every cell value for embedded keyword mentions
-  for (const val of Object.values(row)) {
-    if (!val || val.length > 80) continue; // skip long freetext / numbers
-    const match = matchIntervention(val);
-    if (match && !found.has(match)) found.set(match, loadHours);
-  }
-
-  return Array.from(found.entries()).map(([name, load_hours]) => ({ name, load_hours }));
+// Resolve the date key from a row (tries common column names)
+function rowDate(row: Record<string, string>): string {
+  return row.date ?? row.day ?? row.timestamp ?? row.datetime ?? row.recorded_at ?? "unknown";
 }
 
-function buildProfileFromCSV(rows: Record<string, string>[]): DailyProfile {
-  if (rows.length === 0) {
-    return { interventions: [], metrics_delta: {} };
+// Parse a Pro_State value — accepts 0–1 or 0–100, normalises to 0–1
+function parsePro(val: string | undefined): number {
+  if (!val) return 0;
+  const n = parseFloat(val);
+  if (isNaN(n)) return 0;
+  return n > 1 ? n / 100 : n; // normalise 0–100 → 0–1
+}
+
+// Build DayData records grouped by date from all CSV rows
+function buildDayDataMap(rows: Record<string, string>[]): Map<string, DayData> {
+  const map = new Map<string, DayData>();
+
+  for (const row of rows) {
+    const date = rowDate(row);
+
+    // ActionName is the intervention name
+    const actionRaw = (row.actionname ?? row.action_name ?? row.action ?? "").trim();
+    if (!actionRaw) continue;
+
+    const action: Action = {
+      name: actionRaw,
+      classification: classifyAction(actionRaw),
+      load_hours: parseFloat(row.load_hours ?? row.duration_hours ?? row.duration ?? "1") || 1,
+    };
+
+    // Pro_State columns (accepts various casings)
+    const pro_positive    = parsePro(row.pro_positive    ?? row.pro_pos    ?? row.positive);
+    const pro_recovery    = parsePro(row.pro_recovery    ?? row.pro_rec    ?? row.recovery);
+    const pro_mild_stress = parsePro(row.pro_mildstress  ?? row.pro_mild_stress ?? row.pro_mild ?? row.mildstress);
+    const pro_stress      = parsePro(row.pro_stress      ?? row.pro_str    ?? row.stress);
+
+    if (map.has(date)) {
+      const existing = map.get(date)!;
+      existing.actions.push(action);
+      // Take the latest (last row) Pro_State values for the day
+      existing.pro_positive    = pro_positive    || existing.pro_positive;
+      existing.pro_recovery    = pro_recovery    || existing.pro_recovery;
+      existing.pro_mild_stress = pro_mild_stress || existing.pro_mild_stress;
+      existing.pro_stress      = pro_stress      || existing.pro_stress;
+    } else {
+      map.set(date, { date, actions: [action], pro_positive, pro_recovery, pro_mild_stress, pro_stress });
+    }
   }
 
-  const current = rows[rows.length - 1];
-  const previous = rows.length > 1 ? rows[rows.length - 2] : null;
+  return map;
+}
 
-  const loadHours =
-    parseFloat(current.load_hours ?? current.duration_hours ?? current.duration ?? "1") || 1;
-
-  const interventions = detectInterventions(current, loadHours);
-
-  const pro_recovery = parseFloat(current.pro_recovery ?? current.pro_rec ?? "0") || 0;
-  const prev_recovery = parseFloat(previous?.pro_recovery ?? previous?.pro_rec ?? "0") || 0;
-  const pro_stress = parseFloat(current.pro_stress ?? "0") || 0;
-
-  const hrv_current = parseFloat(current.hrv_trend ?? current.hrv ?? current.heart_rate_variability ?? "0");
-  const hrv_previous = parseFloat(previous?.hrv_trend ?? previous?.hrv ?? previous?.heart_rate_variability ?? String(hrv_current));
-
-  const sleep_current = parseFloat(current.sleep_efficiency ?? current.sleep_score ?? "0");
-  const sleep_previous = parseFloat(previous?.sleep_efficiency ?? previous?.sleep_score ?? String(sleep_current));
-
-  return {
-    interventions,
-    metrics_delta: {
-      pro_recovery: pro_recovery - prev_recovery,
-      pro_stress,
-      persistent_stress: pro_stress > 0.6,
-    },
-    hrv_trend: hrv_current - hrv_previous,
-    sleep_trend: sleep_current - sleep_previous,
-    base_threshold_hours: 16,
-    previous_pro_recovery: prev_recovery,
-    current_pro_recovery: pro_recovery,
-    glucose_volatility: parseFloat(current.glucose_volatility ?? "0") || 0,
-    substrate_shifts: parseFloat(current.substrate_shifts ?? "1") || 1,
-  };
+// Sort dates and return ordered DayData array
+function sortedDays(map: Map<string, DayData>): DayData[] {
+  return Array.from(map.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, v]) => v);
 }
 
 export async function POST(req: NextRequest) {
@@ -129,29 +82,48 @@ export async function POST(req: NextRequest) {
     const files = formData.getAll("files") as File[];
     const manualJson = formData.get("profile") as string | null;
 
-    let profile: DailyProfile;
+    let result;
 
     if (manualJson) {
-      profile = JSON.parse(manualJson) as DailyProfile;
+      // Direct JSON profile (demo / test)
+      const { current, prev } = JSON.parse(manualJson) as { current: DayData; prev: DayData | null };
+      result = evaluateDayData(current, prev);
     } else if (files.length > 0) {
-      const allRows: Record<string, string>[] = [];
+      const dayMap = new Map<string, DayData>();
+
       for (const file of files) {
         if (file.name.endsWith(".csv")) {
-          const text = await file.text();
-          allRows.push(...parseCSVRows(text));
+          const rows = parseCSV(await file.text());
+          const fileMap = buildDayDataMap(rows);
+          // Merge into dayMap
+          for (const [date, dayData] of Array.from(fileMap.entries())) {
+            if (dayMap.has(date)) {
+              const existing = dayMap.get(date)!;
+              existing.actions.push(...dayData.actions);
+              existing.pro_positive    = dayData.pro_positive    || existing.pro_positive;
+              existing.pro_recovery    = dayData.pro_recovery    || existing.pro_recovery;
+              existing.pro_mild_stress = dayData.pro_mild_stress || existing.pro_mild_stress;
+              existing.pro_stress      = dayData.pro_stress      || existing.pro_stress;
+            } else {
+              dayMap.set(date, dayData);
+            }
+          }
         }
       }
-      profile = buildProfileFromCSV(allRows);
+
+      if (dayMap.size === 0) {
+        return NextResponse.json({ error: "No valid rows found. Ensure the CSV has an ActionName column." }, { status: 400 });
+      }
+
+      const days = sortedDays(dayMap);
+      const current = days[days.length - 1];
+      const prev    = days.length > 1 ? days[days.length - 2] : null;
+      result = evaluateDayData(current, prev);
     } else {
       return NextResponse.json({ error: "No files or profile provided" }, { status: 400 });
     }
 
-    const result = evaluateDailyMitochondrialHealth(profile);
-    return NextResponse.json({
-      success: true,
-      result,
-      detected_interventions: profile.interventions.map((i) => i.name),
-    });
+    return NextResponse.json({ success: true, result });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

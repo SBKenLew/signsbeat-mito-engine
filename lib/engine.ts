@@ -1,340 +1,286 @@
-// Signsbeat Multi-Input Mitochondrial Intelligence Engine
-// TypeScript implementation — all 8 layers with bug fixes applied
+// Signsbeat Multi-Input Mitochondrial Intelligence Engine v2
+// Redesigned around ActionName classification, Pro_State evaluation, and T-1 hormetic response logic
 
-export interface Intervention {
+export interface Action {
   name: string;
-  load_hours?: number;
+  classification: "support" | "challenge" | "unknown";
+  load_hours: number;
 }
 
-export interface MetricsDelta {
-  pro_recovery?: number;
-  pro_stress?: number;
-  persistent_stress?: boolean;
+export interface DayData {
+  date: string;
+  actions: Action[];
+  pro_positive: number;    // 0–1
+  pro_recovery: number;    // 0–1
+  pro_mild_stress: number; // 0–1
+  pro_stress: number;      // 0–1
 }
 
-export interface DailyProfile {
-  interventions: Intervention[];
-  metrics_delta: MetricsDelta;
-  base_threshold_hours?: number;
-  hrv_trend?: number;
-  sleep_trend?: number;
-  hrv_baseline?: number;
-  previous_pro_recovery?: number;
-  current_pro_recovery?: number;
-  glucose_volatility?: number;
-  substrate_shifts?: number;
+export interface ProStateDelta {
+  pro_positive_delta: number;
+  pro_recovery_delta: number;
+  pro_mild_stress_delta: number;
+  pro_stress_delta: number;
 }
 
 export interface EngineResult {
-  profile: string;
-  composite_load: number;
-  response_status: string;
-  is_positive: boolean;
-  reserve_capacity_score: string;
-  adaptation_score: string;
-  redox_resilience_score: string;
-  metabolic_flexibility_score: string;
-  dysfunction_probability: string;
-  mitochondrial_health_score: string;
-  layer_breakdown: LayerBreakdown;
+  mito_health_score: number;          // 0–100
+  pro_state: ProStateLabel;
+  adaptation_verdict: string;
+  hormetic_status: HormeticStatus;
+  mild_stress_interpretation: string;
+  support_actions: string[];
+  challenge_actions: string[];
+  unknown_actions: string[];
+  pro_state_values: { pro_positive: number; pro_recovery: number; pro_mild_stress: number; pro_stress: number };
+  pro_state_deltas: ProStateDelta;
+  score_breakdown: ScoreBreakdown;
 }
 
-export interface LayerBreakdown {
-  layer1: { support_count: number; challenge_count: number; cumulative_load: number };
-  layer2: { status: string; is_positive: boolean };
-  layer3: { adaptation_score: number };
-  layer4_reserve: { buffered_threshold: number; reserve_capacity: number };
-  layer5_redox: { score: number; phenotype: string };
-  layer6_metabolic: { score: number; flexibility_class: string };
-  layer7_dysfunction: { score: number; risk_factors: string[] };
-  layer8_health: { score: number };
+export type ProStateLabel = "Pro_Recovery" | "Pro_Positive" | "Pro_MildStress" | "Pro_Stress" | "Baseline";
+export type HormeticStatus = "Optimal" | "Under-Hormetic" | "Over-Hormetic" | "No Challenge";
+
+export interface ScoreBreakdown {
+  base_score: number;
+  challenge_adaptation_bonus: number;
+  resilience_bonus: number;
+  over_hormetic_penalty: number;
+  support_buffer_bonus: number;
+  final: number;
 }
 
-const SUPPORT_INTERVENTIONS = new Set([
-  "sleep", "coq10", "pqq", "creatine", "magnesium",
-  "omega-3", "nac", "glycine", "protein_optimization",
+// ── Intervention Registry ─────────────────────────────────────────────────────
+
+const SUPPORT_KEYWORDS = new Set([
+  "sleep", "coq10", "pqq", "creatine", "magnesium", "omega-3", "omega3",
+  "nac", "glycine", "protein", "protein_optimization", "zinc", "vitamin_d",
+  "vitamin_c", "ashwagandha", "l-theanine", "ltheanine", "melatonin",
+  "berberine", "nmn", "nad", "probiotics", "fish_oil", "multivitamin",
+  "rest", "recovery", "meditation", "breathwork", "massage",
 ]);
 
-const CHALLENGE_INTERVENTIONS = new Set([
-  "fasting", "ketogenic_diet", "exercise", "hiit",
-  "sauna", "cold_plunge", "hbot", "red_light_therapy",
+const CHALLENGE_KEYWORDS = new Set([
+  "exercise", "hiit", "fasting", "intermittent_fasting", "ketogenic", "keto",
+  "ketogenic_diet", "sauna", "infrared_sauna", "cold_plunge", "cold_water",
+  "cwi", "hbot", "hyperbaric", "red_light", "red_light_therapy",
+  "resistance", "strength", "weight_training", "cardio", "aerobic",
+  "running", "cycling", "swimming", "zone_2", "sprints", "crossfit",
+  "vo2max", "tempo", "lactate_threshold",
 ]);
 
-function clamp(val: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, val));
+export function classifyAction(name: string): "support" | "challenge" | "unknown" {
+  const key = name.toLowerCase().trim().replace(/[\s\-\/]+/g, "_");
+  if (SUPPORT_KEYWORDS.has(key)) return "support";
+  if (CHALLENGE_KEYWORDS.has(key)) return "challenge";
+  // partial match
+  const supportArr = Array.from(SUPPORT_KEYWORDS);
+  const challengeArr = Array.from(CHALLENGE_KEYWORDS);
+  for (const s of supportArr) { if (key.includes(s) || s.includes(key)) return "support"; }
+  for (const c of challengeArr) { if (key.includes(c) || c.includes(key)) return "challenge"; }
+  return "unknown";
 }
 
-// Layer 1: Intervention Classification & Multi-Input Mixer
-function layer1(interventions: Intervention[]) {
-  let support_count = 0;
-  let challenge_count = 0;
-  let cumulative_challenge_load = 0;
+// ── Pro_State label from values ───────────────────────────────────────────────
 
-  for (const item of interventions) {
-    const key = item.name.toLowerCase().replace(/\s+/g, "_");
-    const load = item.load_hours ?? 1.0;
-    if (SUPPORT_INTERVENTIONS.has(key)) {
-      support_count++;
-    } else if (CHALLENGE_INTERVENTIONS.has(key)) {
-      challenge_count++;
-      cumulative_challenge_load += load;
-    }
-  }
-
-  return {
-    support_count,
-    challenge_count,
-    cumulative_challenge_load,
-    has_support: support_count > 0,
-    has_challenge: challenge_count > 0,
-  };
+export function dominantProState(
+  pro_positive: number,
+  pro_recovery: number,
+  pro_mild_stress: number,
+  pro_stress: number,
+): ProStateLabel {
+  if (pro_positive === 0 && pro_recovery === 0 && pro_mild_stress === 0 && pro_stress === 0) return "Baseline";
+  const candidates: [number, ProStateLabel][] = [
+    [pro_positive,    "Pro_Positive"],
+    [pro_recovery,    "Pro_Recovery"],
+    [pro_mild_stress, "Pro_MildStress"],
+    [pro_stress,      "Pro_Stress"],
+  ];
+  return candidates.reduce((best, cur) => (cur[0] > best[0] ? cur : best))[1];
 }
 
-// Layer 2: Response Validation Engine
-function layer2(
-  mix: ReturnType<typeof layer1>,
-  delta: MetricsDelta
-): { status: string; is_positive: boolean } {
-  const pro_recovery_delta = delta.pro_recovery ?? 0;
-  const is_persistent_stress = delta.persistent_stress ?? false;
+// ── Hormetic status ───────────────────────────────────────────────────────────
 
-  // No interventions — neutral baseline
-  if (!mix.has_challenge && !mix.has_support) {
-    return { status: "Baseline — No Active Intervention", is_positive: true };
-  }
-
-  if (mix.has_challenge && mix.has_support) {
-    if (is_persistent_stress) {
-      return {
-        status: "Critical Limitation: Persistent Stress Despite Support Buffering",
-        is_positive: false,
-      };
-    }
-    if (pro_recovery_delta > 1.5) {
-      return { status: "Optimized Co-Intervention Rebound", is_positive: true };
-    }
-    return { status: "Buffered Challenge — Monitor Trend", is_positive: true };
-  }
-
-  if (mix.has_challenge && !mix.has_support) {
-    if (!is_persistent_stress && pro_recovery_delta > 0) {
-      return { status: "Positive Adaptation Rebound", is_positive: true };
-    }
-    if (is_persistent_stress) {
-      return { status: "Potential Mitochondrial Limitation", is_positive: false };
-    }
-    return { status: "Challenge Tolerated — No Rebound Yet", is_positive: false };
-  }
-
-  // Support only, no challenge
-  if (pro_recovery_delta > 0 && (delta.pro_stress ?? 0) <= 0) {
-    return { status: "Positive Pure Support Response", is_positive: true };
-  }
-  return { status: "Support Active — Insufficient Response Signal", is_positive: false };
+function hormeticStatus(
+  challenge_count: number,
+  pro_stress: number,
+  pro_stress_delta: number,
+  pro_recovery_delta: number,
+): HormeticStatus {
+  if (challenge_count === 0) return "No Challenge";
+  // Over-hormetic: many challenges AND stress rising/high
+  if (challenge_count >= 3 && pro_stress > 0.30) return "Over-Hormetic";
+  if (pro_stress_delta > 0.10 && pro_recovery_delta <= 0) return "Over-Hormetic";
+  // Under-hormetic: challenges present but no meaningful stress OR recovery response
+  if (pro_stress < 0.10 && pro_recovery_delta <= 0) return "Under-Hormetic";
+  return "Optimal";
 }
 
-// Layer 3: Mitochondrial Adaptation Engine (FIX — was missing from original)
-function layer3(
-  previous_pro_recovery: number,
-  current_pro_recovery: number,
-  stress_generated: number
-): number {
-  const recovery_gain = current_pro_recovery - previous_pro_recovery;
-  if (stress_generated <= 0) return recovery_gain > 0 ? 100 : 50;
-  const raw = recovery_gain / stress_generated;
-  return clamp(raw * 50 + 50, 0, 100); // centre around 50
-}
+// ── MildStress dual interpretation ───────────────────────────────────────────
 
-// Layer 4: Composite Reserve Capacity
-function layer4_reserve(
-  cumulative_load: number,
-  base_threshold: number,
-  support_count: number
-): { buffered_threshold: number; reserve_capacity: number } {
-  // FIX: guard against zero base_threshold
-  const effective_base = base_threshold > 0 ? base_threshold : 16.0;
-  const buffered_threshold = effective_base * (1.0 + support_count * 0.1);
-  if (cumulative_load > buffered_threshold) {
-    const decrement = Math.min(1.0, (cumulative_load - buffered_threshold) / buffered_threshold);
-    return { buffered_threshold, reserve_capacity: Math.max(0, 1.0 - decrement) };
+function interpretMildStress(
+  pro_mild_stress_delta: number,
+  prev_pro_stress: number,
+  challenge_count: number,
+): string {
+  if (pro_mild_stress_delta <= 0) return "Pro_MildStress stable or decreasing — no active hormetic transition";
+  if (prev_pro_stress > 0.25) {
+    return "Resilience Building — same stressor previously triggered Pro_Stress; body now only reaches Pro_MildStress (positive adaptation)";
   }
-  return { buffered_threshold, reserve_capacity: 1.0 };
-}
-
-// Layer 5: Redox Resilience Engine (FIX — was mislabelled "Layer 4" and not implemented)
-function layer5_redox(
-  hrv_trend: number,
-  persistent_stress: boolean,
-  pro_recovery_delta: number
-): { score: number; phenotype: string } {
-  let score = 50;
-  if (hrv_trend > 0) score += 20;
-  if (!persistent_stress) score += 15;
-  if (pro_recovery_delta > 0) score += 15;
-  if (persistent_stress) score -= 30;
-  if (hrv_trend < -1) score -= 20;
-  const clamped = clamp(score, 0, 100);
-  const phenotype =
-    clamped >= 70
-      ? "Healthy — Rapid Over-Compensatory Rebound"
-      : clamped >= 40
-      ? "Transitional — Partial ROS Clearance"
-      : "Dysfunctional — Sustained Unmitigated Stress";
-  return { score: clamped, phenotype };
-}
-
-// Layer 6: Metabolic Flexibility Engine (FIX — was missing from original)
-function layer6_metabolic(
-  substrate_shifts: number,
-  glucose_volatility: number,
-  hrv_trend: number
-): { score: number; flexibility_class: string } {
-  let score = 50;
-  score += Math.min(substrate_shifts * 10, 30); // reward substrate switching
-  score -= Math.min(glucose_volatility * 5, 30); // penalise high glucose swings
-  if (hrv_trend > 0) score += 10;
-  const clamped = clamp(score, 0, 100);
-  const flexibility_class =
-    clamped >= 70 ? "Flexible" : clamped >= 40 ? "Moderately Flexible" : "Inflexible";
-  return { score: clamped, flexibility_class };
-}
-
-// Layer 7: Mitochondrial Dysfunction Probability
-function layer7_dysfunction(
-  risk_factors: { persistent_pro_stress: boolean; declining_hrv: boolean; poor_sleep: boolean },
-  mix: ReturnType<typeof layer1>,
-  validation_status: string
-): { score: number; risk_factors: string[] } {
-  let score = 0;
-  const active: string[] = [];
-  if (risk_factors.persistent_pro_stress) { score += 30; active.push("Persistent Pro_Stress"); }
-  if (risk_factors.declining_hrv) { score += 20; active.push("Declining HRV Baseline"); }
-  if (risk_factors.poor_sleep) { score += 20; active.push("Degraded Sleep Architecture"); }
-  if (mix.has_support && validation_status.includes("Critical Limitation")) {
-    score += 30;
-    active.push("Adaptation Failure Despite Support Stack");
+  if (challenge_count > 0) {
+    return "Under-Hormetic — challenge is sub-threshold; body is not fully stressed; consider increasing stressor intensity";
   }
-  return { score: clamp(score, 0, 100), risk_factors: active };
+  return "Pro_MildStress elevated without active challenge — monitor recovery inputs";
 }
 
-// Layer 8: Mitochondrial Health Probability Score
-function layer8_health(
-  metrics: {
-    rising_pro_recovery: boolean;
-    improved_hrv: boolean;
-    improved_sleep: boolean;
-    faster_recovery: boolean;
-    recovery_suppression: boolean;
-    persistent_pro_stress: boolean;
-  },
-  mix: ReturnType<typeof layer1>
-): number {
-  let pos = 0;
-  if (metrics.rising_pro_recovery) pos += 25;
-  if (metrics.improved_hrv) pos += 20;
-  if (metrics.improved_sleep) pos += 15;
-  if (metrics.faster_recovery) pos += 20;
+// ── Core Mito Health Scoring ──────────────────────────────────────────────────
 
-  // FIX: only award multi-challenge bonus if recovery is NOT suppressed
-  if (mix.challenge_count >= 2 && metrics.faster_recovery && !metrics.recovery_suppression) {
-    pos += 20;
-  }
-
-  let neg = 0;
-  if (metrics.persistent_pro_stress) neg += 35;
-  if (metrics.recovery_suppression) neg += 35;
-  // FIX: do not double-penalise suppression under multi-challenge — already captured above
-  if (mix.challenge_count >= 2 && metrics.recovery_suppression && !metrics.persistent_pro_stress) {
-    neg += 10; // reduced from original 20 to avoid stacking
-  }
-
-  return clamp(pos - neg, 0, 100);
-}
-
-// Main orchestrator
-export function evaluateDailyMitochondrialHealth(profile: DailyProfile): EngineResult {
-  const mix = layer1(profile.interventions);
-  const validation = layer2(mix, profile.metrics_delta);
-
-  // No interventions detected — score is 0; caller should prompt user to log data
-  if (!mix.has_challenge && !mix.has_support) {
-    return {
-      profile: "Challenges: 0 | Supports: 0",
-      composite_load: 0,
-      response_status: validation.status,
-      is_positive: false,
-      reserve_capacity_score: "0.0%",
-      adaptation_score: "0.0%",
-      redox_resilience_score: "0.0%",
-      metabolic_flexibility_score: "0.0%",
-      dysfunction_probability: "0.0%",
-      mitochondrial_health_score: "0.0%",
-      layer_breakdown: {
-        layer1: { support_count: 0, challenge_count: 0, cumulative_load: 0 },
-        layer2: validation,
-        layer3: { adaptation_score: 0 },
-        layer4_reserve: { buffered_threshold: 16, reserve_capacity: 0 },
-        layer5_redox: { score: 0, phenotype: "No intervention data detected in dataset" },
-        layer6_metabolic: { score: 0, flexibility_class: "No data" },
-        layer7_dysfunction: { score: 0, risk_factors: ["No intervention data detected"] },
-        layer8_health: { score: 0 },
-      },
-    };
-  }
-
-  const prev_rec = profile.previous_pro_recovery ?? 0;
-  const curr_rec = profile.current_pro_recovery ?? (prev_rec + (profile.metrics_delta.pro_recovery ?? 0));
-  const stress_gen = profile.metrics_delta.pro_stress ?? 0;
-  const adaptation_score = layer3(prev_rec, curr_rec, Math.abs(stress_gen));
-
-  const { buffered_threshold, reserve_capacity } = layer4_reserve(
-    mix.cumulative_challenge_load,
-    profile.base_threshold_hours ?? 16,
-    mix.support_count
+function scoreMitoHealth(
+  current: DayData,
+  prev: DayData | null,
+  delta: ProStateDelta,
+  challenge_count: number,
+  support_count: number,
+  hormetic: HormeticStatus,
+): ScoreBreakdown {
+  // Base score: weighted sum of current Pro_State values
+  // Pro_Positive is the ultimate positive signal → highest weight
+  const base_score = clamp(
+    current.pro_positive * 40 + current.pro_recovery * 30,
+    0, 70
   );
 
-  const hrv = profile.hrv_trend ?? 0;
-  const sleep = profile.sleep_trend ?? 0;
-  const redox = layer5_redox(hrv, profile.metrics_delta.persistent_stress ?? false, profile.metrics_delta.pro_recovery ?? 0);
-  const metabolic = layer6_metabolic(profile.substrate_shifts ?? 1, profile.glucose_volatility ?? 0, hrv);
+  // Challenge adaptation bonus (T-1 response)
+  let challenge_adaptation_bonus = 0;
+  if (challenge_count > 0) {
+    if (delta.pro_recovery_delta > 0 && delta.pro_positive_delta > 0) {
+      // Full adaptation: both Recovery and Positive rising → best outcome
+      challenge_adaptation_bonus = 20;
+    } else if (delta.pro_recovery_delta > 0) {
+      // Partial adaptation: Recovery rising
+      challenge_adaptation_bonus = 12;
+    } else if (delta.pro_positive_delta > 0) {
+      // Positive rising without explicit recovery delta — still good
+      challenge_adaptation_bonus = 10;
+    }
+    // Additional bonus: can the body tolerate higher load AND recover?
+    if (challenge_count >= 2 && delta.pro_recovery_delta > 0.05 && hormetic === "Optimal") {
+      challenge_adaptation_bonus += 10; // high stressor tolerance + recovery = highest score
+    }
+  }
 
-  const risk_factors = {
-    persistent_pro_stress: profile.metrics_delta.persistent_stress ?? false,
-    declining_hrv: hrv < 0,
-    poor_sleep: sleep < 0,
-  };
-  const dysfunction = layer7_dysfunction(risk_factors, mix, validation.status);
+  // Resilience bonus: MildStress ↑ from a previously high-stress state = positive adaptation
+  let resilience_bonus = 0;
+  if (
+    delta.pro_mild_stress_delta > 0 &&
+    prev !== null &&
+    prev.pro_stress > 0.25 &&
+    challenge_count > 0
+  ) {
+    resilience_bonus = 8; // same stressor, downgraded response = resilience gained
+  }
+  // Support + good recovery = buffer bonus
+  const support_buffer_bonus = (support_count > 0 && current.pro_recovery > 0.50) ? 5 : 0;
 
-  const health_inputs = {
-    rising_pro_recovery: (profile.metrics_delta.pro_recovery ?? 0) > 0,
-    improved_hrv: hrv > 0,
-    improved_sleep: sleep > 0,
-    faster_recovery: validation.is_positive,
-    recovery_suppression: (profile.metrics_delta.pro_recovery ?? 0) < -0.5,
-    persistent_pro_stress: profile.metrics_delta.persistent_stress ?? false,
-  };
-  const health_score = layer8_health(health_inputs, mix);
+  // Over-hormetic penalty: Pro_Stress spikes despite (or due to) challenges
+  let over_hormetic_penalty = 0;
+  if (hormetic === "Over-Hormetic") {
+    over_hormetic_penalty = challenge_count >= 3 ? 30 : 20;
+  }
+  if (delta.pro_stress_delta > 0.15) {
+    over_hormetic_penalty += 10; // acute stress spike adds extra penalty
+  }
 
+  const raw = base_score + challenge_adaptation_bonus + resilience_bonus + support_buffer_bonus - over_hormetic_penalty;
   return {
-    profile: `Challenges: ${mix.challenge_count} | Supports: ${mix.support_count}`,
-    composite_load: mix.cumulative_challenge_load,
-    response_status: validation.status,
-    is_positive: validation.is_positive,
-    reserve_capacity_score: `${(reserve_capacity * 100).toFixed(1)}%`,
-    adaptation_score: `${adaptation_score.toFixed(1)}%`,
-    redox_resilience_score: `${redox.score.toFixed(1)}%`,
-    metabolic_flexibility_score: `${metabolic.score.toFixed(1)}%`,
-    dysfunction_probability: `${dysfunction.score.toFixed(1)}%`,
-    mitochondrial_health_score: `${health_score.toFixed(1)}%`,
-    layer_breakdown: {
-      layer1: { support_count: mix.support_count, challenge_count: mix.challenge_count, cumulative_load: mix.cumulative_challenge_load },
-      layer2: validation,
-      layer3: { adaptation_score },
-      layer4_reserve: { buffered_threshold, reserve_capacity },
-      layer5_redox: redox,
-      layer6_metabolic: metabolic,
-      layer7_dysfunction: dysfunction,
-      layer8_health: { score: health_score },
-    },
+    base_score: round(base_score),
+    challenge_adaptation_bonus: round(challenge_adaptation_bonus),
+    resilience_bonus: round(resilience_bonus),
+    over_hormetic_penalty: round(over_hormetic_penalty),
+    support_buffer_bonus: round(support_buffer_bonus),
+    final: round(clamp(raw, 0, 100)),
   };
 }
+
+// ── Adaptation verdict ────────────────────────────────────────────────────────
+
+function adaptationVerdict(
+  challenge_count: number,
+  delta: ProStateDelta,
+  hormetic: HormeticStatus,
+  pro_state: ProStateLabel,
+): string {
+  if (challenge_count === 0 && pro_state === "Baseline") return "No interventions logged — score is 0";
+  if (challenge_count === 0) return "Support-only protocol — no hormetic stimulus applied";
+
+  if (hormetic === "Over-Hormetic") {
+    return `Over-hormetic: ${challenge_count} challenge(s) exceeded mitochondrial tolerance → Pro_Stress elevated. Reduce challenge load or add support interventions.`;
+  }
+  if (delta.pro_recovery_delta > 0 && delta.pro_positive_delta > 0) {
+    return "Full adaptation cycle: Challenge → Pro_Recovery ↑ → Pro_Positive ↑ — optimal mitochondrial response";
+  }
+  if (delta.pro_recovery_delta > 0) {
+    return "Positive adaptation: Challenge → Pro_Recovery ↑ — continue current protocol";
+  }
+  if (delta.pro_mild_stress_delta > 0 && delta.pro_stress_delta <= 0) {
+    return "Transitional response: Challenge → Pro_MildStress ↑ — body building resilience or stressor is sub-threshold";
+  }
+  if (delta.pro_stress_delta > 0) {
+    return "Acute stress response: Pro_Stress ↑ — monitor T-1; expected recovery rebound if mitochondria are healthy";
+  }
+  return "Neutral response — no significant Pro_State shift detected";
+}
+
+// ── Main evaluator ────────────────────────────────────────────────────────────
+
+export function evaluateDayData(current: DayData, prev: DayData | null): EngineResult {
+  const support_actions   = current.actions.filter(a => a.classification === "support").map(a => a.name);
+  const challenge_actions = current.actions.filter(a => a.classification === "challenge").map(a => a.name);
+  const unknown_actions   = current.actions.filter(a => a.classification === "unknown").map(a => a.name);
+
+  const challenge_count = challenge_actions.length;
+  const support_count   = support_actions.length;
+
+  const delta: ProStateDelta = prev
+    ? {
+        pro_positive_delta:    current.pro_positive    - prev.pro_positive,
+        pro_recovery_delta:    current.pro_recovery    - prev.pro_recovery,
+        pro_mild_stress_delta: current.pro_mild_stress - prev.pro_mild_stress,
+        pro_stress_delta:      current.pro_stress      - prev.pro_stress,
+      }
+    : { pro_positive_delta: 0, pro_recovery_delta: 0, pro_mild_stress_delta: 0, pro_stress_delta: 0 };
+
+  const hormetic = hormeticStatus(challenge_count, current.pro_stress, delta.pro_stress_delta, delta.pro_recovery_delta);
+  const mild_stress_interpretation = interpretMildStress(delta.pro_mild_stress_delta, prev?.pro_stress ?? 0, challenge_count);
+  const score_breakdown = scoreMitoHealth(current, prev, delta, challenge_count, support_count, hormetic);
+  const pro_state = dominantProState(current.pro_positive, current.pro_recovery, current.pro_mild_stress, current.pro_stress);
+  const adaptation_verdict = adaptationVerdict(challenge_count, delta, hormetic, pro_state);
+
+  return {
+    mito_health_score: score_breakdown.final,
+    pro_state,
+    adaptation_verdict,
+    hormetic_status: hormetic,
+    mild_stress_interpretation,
+    support_actions,
+    challenge_actions,
+    unknown_actions,
+    pro_state_values: {
+      pro_positive:    round(current.pro_positive * 100),
+      pro_recovery:    round(current.pro_recovery * 100),
+      pro_mild_stress: round(current.pro_mild_stress * 100),
+      pro_stress:      round(current.pro_stress * 100),
+    },
+    pro_state_deltas: {
+      pro_positive_delta:    round(delta.pro_positive_delta * 100),
+      pro_recovery_delta:    round(delta.pro_recovery_delta * 100),
+      pro_mild_stress_delta: round(delta.pro_mild_stress_delta * 100),
+      pro_stress_delta:      round(delta.pro_stress_delta * 100),
+    },
+    score_breakdown,
+  };
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function clamp(v: number, min: number, max: number) { return Math.min(max, Math.max(min, v)); }
+function round(v: number) { return Math.round(v * 10) / 10; }
