@@ -119,18 +119,6 @@ export default function Home() {
                   sublabel="ROS clearance efficiency"
                   color="green"
                 />
-                <MetricCard
-                  label="Reserve Capacity"
-                  value={result.reserve_capacity_score}
-                  sublabel="Hormetic tolerance"
-                  color="purple"
-                />
-                <MetricCard
-                  label="Dysfunction Risk"
-                  value={result.dysfunction_probability}
-                  sublabel="Mito dysfunction signal"
-                  color={parseFloat(result.dysfunction_probability) >= 50 ? "red" : "green"}
-                />
               </div>
             )}
 

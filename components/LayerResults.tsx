@@ -29,13 +29,6 @@ export default function LayerResults({ result }: LayerResultsProps) {
       desc: "Recovery Gain / Stress Generated",
     },
     {
-      label: "L4 — Reserve Capacity",
-      value: result.reserve_capacity_score,
-      pct: parseNum(result.reserve_capacity_score),
-      color: "bg-violet-400",
-      desc: "Buffered stress tolerance ceiling",
-    },
-    {
       label: "L5 — Redox Resilience",
       value: result.redox_resilience_score,
       pct: parseNum(result.redox_resilience_score),
@@ -48,16 +41,6 @@ export default function LayerResults({ result }: LayerResultsProps) {
       pct: parseNum(result.metabolic_flexibility_score),
       color: "bg-teal-400",
       desc: result.layer_breakdown.layer6_metabolic.flexibility_class,
-    },
-    {
-      label: "L7 — Dysfunction Risk",
-      value: result.dysfunction_probability,
-      pct: parseNum(result.dysfunction_probability),
-      color: "bg-red-400",
-      desc:
-        result.layer_breakdown.layer7_dysfunction.risk_factors.length > 0
-          ? result.layer_breakdown.layer7_dysfunction.risk_factors.join(" · ")
-          : "No active risk flags",
     },
     {
       label: "L8 — Mito Health Score",
