@@ -53,7 +53,7 @@ function detectInterventions(
   const found = new Map<string, number>(); // name → load_hours
 
   // Pass 1 — explicit list columns (semicolon or comma-separated)
-  const listCols = ["interventions", "activity", "activities", "supplements", "supplement", "drugs", "therapies"];
+  const listCols = ["actionname", "action_name", "interventions", "activity", "activities", "supplements", "supplement", "drugs", "therapies"];
   for (const col of listCols) {
     if (row[col]) {
       for (const part of row[col].split(/[;,|]/)) {

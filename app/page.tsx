@@ -155,10 +155,8 @@ export default function Home() {
             ) : (
               <p className="text-sm text-red-300/80">
                 No known interventions or supplements detected in the uploaded dataset. Score is 0.
-                Ensure your CSV includes intervention names in columns such as{" "}
-                <span className="text-white/50">interventions</span>,{" "}
-                <span className="text-white/50">activity</span>, or{" "}
-                <span className="text-white/50">supplement</span>.
+                Ensure your CSV includes intervention names in a column named{" "}
+                <span className="text-white/50">ActionName</span>.
               </p>
             )}
           </div>
