@@ -145,6 +145,15 @@ export default function Home() {
                 {t === "upload" ? "Upload Files" : "Run Demo"}
               </button>
             ))}
+            {result && (
+              <button
+                onClick={() => { setResult(null); setError(null); }}
+                className="py-2 px-3 rounded-xl text-sm font-semibold text-red-400 hover:bg-red-500/15 transition-all border border-red-400/20"
+                title="Delete data"
+              >
+                Delete data
+              </button>
+            )}
           </div>
 
           {tab === "upload" ? (
