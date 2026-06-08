@@ -82,7 +82,7 @@ export default function Home() {
   }
 
   const state: ProState = result ? deriveState(result) : "Baseline";
-  const healthScore = result ? parseFloat(result.mitochondrial_health_score) : 0;
+  const healthScore = result ? parseFloat(result.mitochondrial_health_score) : 50;
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center bg-gradient-to-b from-[#4A3B8C] via-[#6B5EA8] to-[#8B7FC4]">
