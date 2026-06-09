@@ -8,8 +8,9 @@ export interface ActionName {
 }
 
 export interface MetricsDelta {
-  pro_recovery?: number;   // delta vs previous day (positive = improving)
-  pro_stress?: number;     // current pro_stress value or delta
+  pro_recovery?: number;      // delta vs previous day (positive = improving)
+  pro_mild_stress?: number;   // delta vs previous day for Pro_MildStress
+  pro_stress?: number;        // current pro_stress value or delta
   persistent_stress?: boolean;
 }
 
@@ -41,6 +42,9 @@ export interface EngineResult {
   support_action_names: string[];
   challenge_action_names: string[];
   unknown_action_names: string[];
+  // ActionNames not in registry but reclassified via observed Pro_State response
+  inferred_challenge_names: string[];   // promoted Pro_Recovery → inferred Challenge
+  inferred_support_names: string[];     // promoted Pro_MildStress → inferred Support
   pro_state_values: {
     pro_positive: number;
     pro_recovery: number;
@@ -95,8 +99,16 @@ export function classifyActionName(name: string): "support" | "challenge" | "unk
 }
 
 // ── Layer 1: ActionName Classification & Multi-Input Mixer ───────────────────
+// Unknown ActionNames are reclassified via observed Pro_State promotion:
+//   • Pro_Recovery delta > 0  → inferred Challenge (hormetic adaptation signal)
+//   • Pro_MildStress delta > 0 → inferred Support   (mild modulation signal)
+//   Exception: items already in the hormetic registry stay as Challenge regardless.
 
-function layer1_process_daily_mix(action_names: ActionName[]): {
+function layer1_process_daily_mix(
+  action_names: ActionName[],
+  pro_recovery_delta: number = 0,
+  pro_mild_stress_delta: number = 0,
+): {
   support_count: number;
   challenge_count: number;
   cumulative_challenge_load: number;
@@ -105,14 +117,17 @@ function layer1_process_daily_mix(action_names: ActionName[]): {
   support_names: string[];
   challenge_names: string[];
   unknown_names: string[];
+  inferred_challenge_names: string[];
+  inferred_support_names: string[];
 } {
-  const support_names:   string[] = [];
-  const challenge_names: string[] = [];
-  const unknown_names:   string[] = [];
+  const support_names:          string[] = [];
+  const challenge_names:        string[] = [];
+  const unknown_names:          string[] = [];
+  const inferred_challenge_names: string[] = [];
+  const inferred_support_names:   string[] = [];
   let cumulative_challenge_load = 0.0;
 
   for (const item of action_names) {
-    const key  = item.name.toLowerCase().trim().replace(/[\s\-\/]+/g, "_");
     const load = item.load_hours ?? 1.0;
     const cls  = classifyActionName(item.name);
 
@@ -122,7 +137,20 @@ function layer1_process_daily_mix(action_names: ActionName[]): {
       challenge_names.push(item.name);
       cumulative_challenge_load += load;
     } else {
-      unknown_names.push(item.name);
+      // Unknown — reclassify from observed Pro_State promotion
+      if (pro_recovery_delta > 0) {
+        // Pro_Recovery promoted → hormetic/challenge response inferred
+        inferred_challenge_names.push(item.name);
+        challenge_names.push(item.name);          // counted as challenge
+        cumulative_challenge_load += load;
+      } else if (pro_mild_stress_delta > 0) {
+        // Pro_MildStress promoted → supportive/modulating response inferred
+        inferred_support_names.push(item.name);
+        support_names.push(item.name);            // counted as support
+      } else {
+        // No observable Pro_State signal — stays truly unknown
+        unknown_names.push(item.name);
+      }
     }
   }
 
@@ -135,6 +163,8 @@ function layer1_process_daily_mix(action_names: ActionName[]): {
     support_names,
     challenge_names,
     unknown_names,
+    inferred_challenge_names,
+    inferred_support_names,
   };
 }
 
@@ -274,7 +304,10 @@ export function evaluateDailyMitochondrialHealth(profile: DailyProfile): EngineR
   const metrics_delta = profile.metrics_delta ?? {};
 
   // Layer 1 — classify all ActionNames
-  const mix_meta = layer1_process_daily_mix(action_names);
+  // Pass Pro_State deltas so unknown ActionNames can be reclassified by observed response
+  const pro_recovery_delta    = metrics_delta.pro_recovery    ?? 0;
+  const pro_mild_stress_delta = metrics_delta.pro_mild_stress ?? 0;
+  const mix_meta = layer1_process_daily_mix(action_names, pro_recovery_delta, pro_mild_stress_delta);
 
   // Layer 2 — validate composite physiological signatures
   const validation = layer2_validate_composite_response(mix_meta, metrics_delta);
@@ -320,11 +353,13 @@ export function evaluateDailyMitochondrialHealth(profile: DailyProfile): EngineR
     final_mito_health_score:  `${health_score.toFixed(1)}%`,
 
     // UI extensions
-    is_positive:            validation.is_positive,
-    adaptation_score:       parseFloat(adaptation_score.toFixed(2)),
-    support_action_names:   mix_meta.support_names,
-    challenge_action_names: mix_meta.challenge_names,
-    unknown_action_names:   mix_meta.unknown_names,
+    is_positive:              validation.is_positive,
+    adaptation_score:         parseFloat(adaptation_score.toFixed(2)),
+    support_action_names:     mix_meta.support_names.filter(n => !mix_meta.inferred_support_names.includes(n)),
+    challenge_action_names:   mix_meta.challenge_names.filter(n => !mix_meta.inferred_challenge_names.includes(n)),
+    unknown_action_names:     mix_meta.unknown_names,
+    inferred_challenge_names: mix_meta.inferred_challenge_names,
+    inferred_support_names:   mix_meta.inferred_support_names,
     pro_state_values: {
       pro_positive:    Math.round((profile.pro_positive    ?? 0) * 100),
       pro_recovery:    Math.round((profile.pro_recovery    ?? 0) * 100),

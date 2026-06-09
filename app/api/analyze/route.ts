@@ -92,6 +92,7 @@ function sortedDays(map: Map<string, DayAccumulator>): DayAccumulator[] {
 function buildProfile(current: DayAccumulator, prev: DayAccumulator | null): DailyProfile {
   // metrics_delta: differences between current and previous day Pro_State values
   const pro_recovery_delta    = current.pro_recovery    - (prev?.pro_recovery    ?? current.pro_recovery);
+  const pro_mild_stress_delta = current.pro_mild_stress - (prev?.pro_mild_stress ?? current.pro_mild_stress);
   const pro_stress_delta      = current.pro_stress      - (prev?.pro_stress      ?? current.pro_stress);
   const hrv_trend             = current.hrv             - (prev?.hrv             ?? current.hrv);
   const sleep_trend           = current.sleep_efficiency - (prev?.sleep_efficiency ?? current.sleep_efficiency);
@@ -100,8 +101,9 @@ function buildProfile(current: DayAccumulator, prev: DayAccumulator | null): Dai
     action_names: current.action_names,
     metrics_delta: {
       pro_recovery:      pro_recovery_delta,
+      pro_mild_stress:   pro_mild_stress_delta,   // NEW — used for unknown ActionName reclassification
       pro_stress:        pro_stress_delta,
-      persistent_stress: current.pro_stress > 0.40,   // Pro_Stress > 40% = persistent
+      persistent_stress: current.pro_stress > 0.40,
     },
     base_threshold_hours: current.base_threshold_hours,
     hrv_trend,

@@ -136,32 +136,55 @@ export default function Home() {
       </div>
 
       {/* ActionName Tags */}
-      {result && (result.support_action_names.length > 0 || result.challenge_action_names.length > 0 || result.unknown_action_names.length > 0) && (
+      {result && (
+        result.support_action_names.length > 0 ||
+        result.challenge_action_names.length > 0 ||
+        result.inferred_challenge_names.length > 0 ||
+        result.inferred_support_names.length > 0 ||
+        result.unknown_action_names.length > 0
+      ) && (
         <div className="w-full max-w-md px-5 mt-4">
           <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/15 p-4">
             <p className="text-xs text-white/40 uppercase tracking-widest mb-2 font-semibold">
               ActionNames detected — {result.action_name_profile}
             </p>
             <div className="flex flex-wrap gap-2">
+              {/* Registry-matched Challenges */}
               {result.challenge_action_names.map((n) => (
                 <span key={n} className={`px-3 py-1 rounded-full text-xs font-medium border ${CLS_STYLES.challenge}`}>
                   ⚡ {n.replace(/_/g, " ")}
                 </span>
               ))}
+              {/* Registry-matched Support */}
               {result.support_action_names.map((n) => (
                 <span key={n} className={`px-3 py-1 rounded-full text-xs font-medium border ${CLS_STYLES.support}`}>
                   ✦ {n.replace(/_/g, " ")}
                 </span>
               ))}
+              {/* Inferred Challenge — not in registry, Pro_Recovery promoted */}
+              {result.inferred_challenge_names.map((n) => (
+                <span key={n} className="px-3 py-1 rounded-full text-xs font-medium border border-violet-400/40 bg-violet-500/10 text-violet-300 italic">
+                  ⚡~ {n.replace(/_/g, " ")}
+                </span>
+              ))}
+              {/* Inferred Support — not in registry, Pro_MildStress promoted */}
+              {result.inferred_support_names.map((n) => (
+                <span key={n} className="px-3 py-1 rounded-full text-xs font-medium border border-sky-400/40 bg-sky-500/10 text-sky-300 italic">
+                  ✦~ {n.replace(/_/g, " ")}
+                </span>
+              ))}
+              {/* Still truly unknown */}
               {result.unknown_action_names.map((n) => (
                 <span key={n} className={`px-3 py-1 rounded-full text-xs font-medium border ${CLS_STYLES.unknown}`}>
                   ? {n.replace(/_/g, " ")}
                 </span>
               ))}
             </div>
-            <div className="flex gap-4 mt-3 text-xs text-white/30">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-white/30">
               <span>✦ Support</span>
               <span>⚡ Challenge (Hormetic)</span>
+              <span className="italic">✦~ Inferred Support (Pro_MildStress ↑)</span>
+              <span className="italic">⚡~ Inferred Challenge (Pro_Recovery ↑)</span>
               <span>? Unclassified</span>
             </div>
           </div>
